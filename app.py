@@ -1,106 +1,116 @@
 from flask import Flask, request, jsonify
 import threading
 import requests
+import os
 from datetime import datetime
 
-# Import modules
-from scam_detector import detect_scam_intent
-from ai_agent import generate_scambait_reply
-from scam_data_extractor import extractor
+# Import modules (Ensure these files are in the same directory)
+try:
+    from scam_detector import detect_scam_intent
+    from ai_agent import generate_scambait_reply
+    from scam_data_extractor import extractor
+except ImportError as e:
+    print(f"Import Error: Make sure your module files are present. {e}")
 
 app = Flask(__name__)
 
 # --- CONFIG ---
-REQUIRED_API_KEY = "RIDHIMAGARG2301"
+# Pro-tip: Use environment variables for production!
+REQUIRED_API_KEY = os.getenv("HONEYPOT_API_KEY", "RIDHIMAGARG2301")
 GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
 
-# Global Session Storage
+# Global Session Storage (In-memory)
 session_storage = {}
 
 def send_guvi_callback(session_id, session_data):
     """
     STRICT JSON PAYLOAD SENDER
+    Runs in background on standard VPS/PaaS.
     """
     try:
-        # Prepare strictly formatted payload
         payload = {
             "sessionId": session_id,
             "scamDetected": session_data["scamDetected"],
             "totalMessagesExchanged": session_data["msg_count"],
             "extractedIntelligence": {
-                "bankAccounts": session_data["intel"]["bankAccounts"],
-                "upiIds": session_data["intel"]["upiIds"],
-                "phishingLinks": session_data["intel"]["phishingLinks"],
-                "phoneNumbers": session_data["intel"]["phoneNumbers"],
-                "suspiciousKeywords": session_data["intel"]["suspiciousKeywords"]
+                "bankAccounts": session_data["intel"].get("bankAccounts", []),
+                "upiIds": session_data["intel"].get("upiIds", []),
+                "phishingLinks": session_data["intel"].get("phishingLinks", []),
+                "phoneNumbers": session_data["intel"].get("phoneNumbers", []),
+                "suspiciousKeywords": session_data["intel"].get("suspiciousKeywords", [])
             },
             "agentNotes": extractor.generate_agent_notes(session_data["intel"])
         }
 
-        # Send to GUVI
-        print(f"Sending Callback for {session_id}...")
-        response = requests.post(GUVI_CALLBACK_URL, json=payload, timeout=5)
-        print(f"Callback Status: {response.status_code} | Payload Sent: {payload['extractedIntelligence']}")
+        print(f"🚀 Sending Callback for Session: {session_id}")
+        response = requests.post(GUVI_CALLBACK_URL, json=payload, timeout=10)
+        print(f"✅ Callback Status: {response.status_code}")
         
     except Exception as e:
-        print(f"Callback Failed: {e}")
+        print(f"❌ Callback Failed: {e}")
+
+@app.route('/', methods=['GET'])
+def health_check():
+    return "Agentic Honeypot is LIVE! 🤖", 200
 
 @app.route('/chat', methods=['POST'])
 def chat_endpoint():
     try:
-        # Security Check
+        # 1. Security Check
         if request.headers.get('x-api-key') != REQUIRED_API_KEY:
             return jsonify({"status": "error", "message": "Auth Failed"}), 401
 
-        # Input Parsing
+        # 2. Input Parsing
         data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON payload received"}), 400
+
         session_id = data.get("sessionId")
-        incoming_text = data.get("message", {}).get("text", "")
+        message_obj = data.get("message", {})
+        incoming_text = message_obj.get("text", "") if isinstance(message_obj, dict) else ""
         history = data.get("conversationHistory", [])
 
-        # Initialize Session
+        if not session_id:
+            return jsonify({"status": "error", "message": "sessionId is required"}), 400
+
+        # 3. Initialize/Update Session
         if session_id not in session_storage:
             session_storage[session_id] = {
-                        "scamDetected": False,
-                        "msg_count": 0,
-                        "intel": {
-                            "bankAccounts": [], 
-                            "upiIds": [], 
-                            "phishingLinks": [], 
-                            "phoneNumbers": [], 
-                            "suspiciousKeywords": [], 
-                            "names": [], 
-                            "addresses": [],
-                            "bankNames": [] 
+                "scamDetected": False,
+                "msg_count": 0,
+                "intel": {
+                    "bankAccounts": [], "upiIds": [], "phishingLinks": [], 
+                    "phoneNumbers": [], "suspiciousKeywords": [], 
+                    "names": [], "addresses": [], "bankNames": [] 
                 }
             }
         
         current_session = session_storage[session_id]
         current_session["msg_count"] += 1
 
-        # 1. DETECT SCAM (If not already)
+        # 4. DETECT SCAM
         if not current_session["scamDetected"]:
             detection = detect_scam_intent(incoming_text)
-            if detection["is_scam"]:
+            if detection.get("is_scam"):
                 current_session["scamDetected"] = True
 
-        # 2. EXTRACT DATA (Always run this on every message)
+        # 5. EXTRACT DATA
         new_data = extractor.analyze_message(incoming_text)
-        
-        # Accumulate Data (Purana + Naya)
         for key in current_session["intel"]:
-            if key in new_data:
+            if key in new_data and isinstance(new_data[key], list):
                 current_session["intel"][key].extend(new_data[key])
                 current_session["intel"][key] = list(set(current_session["intel"][key]))
 
-        # 3. GENERATE REPLY & SEND CALLBACK
-        reply_text = "Hello, who is this?"
+        # 6. GENERATE REPLY
+        reply_text = "Hello, how can I help you today?"
         
         if current_session["scamDetected"]:
-            # AI Agent will now try to BAIT the scammer for data
+            # AI Agent baits the scammer
             reply_text = generate_scambait_reply(incoming_text, history)
             
-            # Send Callback in background (Har reply ke baad update bhejo)
+            # Send Callback in background
+            # Note: On Vercel, this thread will be killed immediately. 
+            # On Render/Railway, it will work fine.
             thread = threading.Thread(target=send_guvi_callback, args=(session_id, current_session))
             thread.start()
         
@@ -110,8 +120,13 @@ def chat_endpoint():
         })
 
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"status": "error", "reply": "Server Error"}), 500
+        print(f"🚨 Critical Error: {e}")
+        return jsonify({"status": "error", "reply": "Internal Server Error"}), 500
+
+# Required for Gunicorn/Production
+application = app
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Use environment port for deployment
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
