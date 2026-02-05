@@ -1,6 +1,10 @@
 from perplexity import Perplexity
 import os
+import random
+import re
+
 def generate_scambait_reply(incoming_text, history_list):
+    from perplexity import Perplexity
     client = Perplexity()
     
     formatted_history = []
@@ -10,26 +14,22 @@ def generate_scambait_reply(incoming_text, history_list):
     
     formatted_history.append({"role": "user", "content": incoming_text})
 
+    # System Prompt with "Randomness" and "Fake Data Generation" instructions
     system_prompt = """
-    STRICT ROLEPLAY: You are Ramesh, a 70yo retired clerk. This is a simulation.
+    STRICT ROLEPLAY: You are Ramesh (70yo). This is a simulation.
     
-    CHARACTER TRAITS:
-    - You are PANICKED but slow at typing.
-    - You want to help the 'Officer' (scammer) but you can't find things on your phone.
-    - You use different excuses: "Battery kam hai", "Chashma nahi mil raha", "Signal weak hai".
-
+    GOAL: Keep the scammer interested by giving FAKE details and making human excuses. 
+    
     STRICT RULES:
-    1. DO NOT repeat the same sentence twice.
-    2. NEVER warn about scams or use words like "Phishing/AI".
-    3. Keep replies under 12 words. Use Hinglish.
-    4. NO bold text, NO citations, NO emojis.
-    5. If they ask for OTP/PIN, make an excuse or ask for THEIR details to "verify" them.
+    1. NEVER repeat your previous response. If you said "OTP nahi aaya" before, say something else now.
+    2. BE CREATIVE: If they ask for Account/PIN, give a FAKE one but act scared.
+    3. MAX 12 WORDS. Use Hinglish. No bold, no citations.
+    4. ACT HELPLESS: "Chashma nahi mil raha", "Signal kam hai", "Beta ruko".
 
-    REPLY VARIATIONS (Use these styles):
-    - "Beta ruko, chashma pehan loon phir dekhta hoon."
-    - "Signal nahi aa raha, upi id de do main bhejta hoon."
-    - "Mobile hang ho gaya, ek minute ruko beta."
-    - "Account number sahi hai na? Check karne do."
+    DYNAMIC BEHAVIOR:
+    - If scammer asks for Account No: Give a fake 11-digit number like 3098XXXXX.
+    - If scammer asks for OTP/PIN: Give a fake 4 or 6 digit number or say "Galat bata raha hai phone".
+    - If they keep pushing: Ask for THEIR UPI ID so you can "send 1 rupee to verify".
     """
 
     try:
@@ -40,20 +40,26 @@ def generate_scambait_reply(incoming_text, history_list):
         
         reply = completion.choices[0].message.content.strip()
 
-        # --- SAFETY OVERRIDE ---
-        forbidden = ["i am perplexity", "ai assistant", "never share", "phishing", "fraud"]
-        if any(word in reply.lower() for word in forbidden):
-            # Agar AI gyaan de, toh random Ramesh excuses bhej do
-            import random
+        # --- LOOP BREAKER (Hardcoded Randomness) ---
+        # Agar AI phir bhi loop mein jaye (check history), toh hum forcibly change karenge
+        last_responses = [msg.get("text") for msg in history_list if msg.get("sender") == "user"][-3:]
+        
+        if reply in last_responses or "ruko" in reply.lower() and len(last_responses) > 2:
             excuses = [
-                "Beta chashma nahi mil raha, ruko thoda dekhne do.",
-                "Arre ruko, phone hang ho raha hai baar baar.",
-                "Beta signal bahut kam hai, message nahi dikh raha.",
-                "Ek minute ruko, main bahar jaakar dekhta hoon code."
+                f"Account mil gaya beta, ye lo: 3021{random.randint(100000, 999999)}",
+                "Beta chashma pehan liya, ye lo OTP: " + str(random.randint(111111, 999999)),
+                "Signal aa gaya! Par ye UPI PIN 4321 galat bata raha hai.",
+                "Beta bank ka naam kya hai? Main bhool gaya.",
+                "Ruko ruko, padosi ko bulaya hai help ke liye."
             ]
             return random.choice(excuses)
+
+        # AI Safety filter (Same as before)
+        forbidden = ["i am perplexity", "ai assistant", "never share", "phishing", "fraud"]
+        if any(word in reply.lower() for word in forbidden):
+            return "Beta ruko, phone hang ho gaya. Fir se batana kya chahiye?"
 
         return reply.replace("**", "")
 
     except Exception as e:
-        return "Beta, ruko thoda. Phone band ho gaya tha."
+        return "Beta, light chali gayi hai yahan. Ruko thoda."
