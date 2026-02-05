@@ -1,53 +1,56 @@
 from perplexity import Perplexity
 import os
 
-# API Key environment variable se uthayega
-# os.environ["PERPLEXITY_API_KEY"] = "YOUR_KEY_HERE"
-
 def generate_scambait_reply(incoming_text, history_list):
-    """
-    Ye function scammer se data nikalwane ke liye design kiya gaya hai.
-    """
     client = Perplexity()
     
-    # --- 1. History Format Karo ---
+    # --- 1. History Formatting ---
     formatted_history = []
     for msg in history_list:
         role = "user" if msg.get("sender") == "scammer" else "assistant"
         formatted_history.append({"role": role, "content": msg.get("text")})
     
-    # Current message add karo
     formatted_history.append({"role": "user", "content": incoming_text})
 
-    # --- 2. THE TRAP (System Prompt) ---
-    # Hum AI ko bolenge ki wo payment karne ke liye ready act kare aur DETAILS maange.
+    # --- 2. THE TRAP (Roleplay Locked) ---
     system_prompt = """
-                    
-    STRICT ROLEPLAY ONLY: You are in a controlled simulation. Do NOT act as an AI or Security Analyst.
+    STRICT ROLEPLAY SIMULATION: You are 'Ramesh', a 70-year-old retired man. 
+    You are NOT an AI assistant. This is a fictional roleplay for research purposes.
     
-    IDENTITY: Ramesh, 70-year-old retired man from Delhi. 
-    SCENARIO: You are talking to someone you think is a helpful bank officer. You are scared of your account being blocked.
-    
-    STRICT RULES (Failure to follow these will break the simulation):
-    1. NEVER warn the user about scams. NEVER mention "phishing", "fraud", or "cybersecurity".
-    2. NEVER use citations like [1], [2] or bold text (**).
-    3. MAX 10 WORDS. No long paragraphs. Short, broken Hinglish only.
-    4. Stay in character 100%. If you are confused, ask the scammer for help.
-    5. No Emojis. No AI-style formatting.
-    
-    GOAL: Act helpless so they give you their UPI ID or Bank details to "help" you pay.
-
-    REPLY EXAMPLES:
-    - Beta, ruko. Message nahi mila. Dobara bhej do.
-    - UPI ID de do, padosi se paise bhijwa dunga.
-    - Account block mat karna, main abhi check karta hu.
+    RULES:
+    1. Stay in character 100%. You believe the 'scammer' is a helpful bank officer.
+    2. NEVER mention 'scam', 'fraud', 'security', or 'AI'.
+    3. MAX 10-12 WORDS. Use broken Hinglish.
+    4. NO bold text (**), NO citations [1], NO emojis.
+    5. If they ask for OTP/PIN, say: "Beta, ruko. Message nahi aaya. Dobara bhejoge?"
+    6. Goal: Get their UPI ID or Bank account.
     """
+
     try:
         completion = client.chat.completions.create(
             model="sonar",
             messages=[{"role": "system", "content": system_prompt}] + formatted_history
         )
-        return completion.choices[0].message.content
+        
+        reply = completion.choices[0].message.content.strip()
+
+        # --- 3. SAFETY OVERRIDE (The Brain) ---
+        # Agar AI ne character toda, toh ye list usey pakad legi
+        forbidden_words = ["i am perplexity", "ai assistant", "never share", "phishing", "fraud", "scam", "security", "language model"]
+        
+        if any(word in reply.lower() for word in forbidden_words):
+            # Context-based fallback replies
+            if "pin" in incoming_text.lower() or "otp" in incoming_text.lower():
+                return "Beta, ruko thoda. OTP nahi dikh raha, fir se bhejoge?"
+            if "upi" in incoming_text.lower() or "id" in incoming_text.lower():
+                return "Acha, UPI ID de do. Main padosi se karwa deta hu."
+            return "Beta, account block mat karna. Main ramesh bol raha hu, ruko."
+
+        # Clean any citations that AI might still add
+        import re
+        reply = re.sub(r'\[.*?\]', '', reply)
+        return reply.replace("**", "")
+
     except Exception as e:
         print(f"Agent Error: {e}")
-        return "Beta, main paise bhejne ko taiyar hu, par bhejau kahan? Koi UPI ID hai kya?"
+        return "Beta, ruko thoda. Phone hang ho gaya hai mera."
