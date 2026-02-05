@@ -1,3 +1,5 @@
+from perplexity import Perplexity
+import os
 def generate_scambait_reply(incoming_text, history_list):
     client = Perplexity()
     
